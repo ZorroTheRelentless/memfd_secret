@@ -1,0 +1,12 @@
+[package]
+name = "memfd-secret"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+libc = "0.2.184"
+
+[dev-dependencies]
+errno = "0.3.14"
+hegeltest = "0.5.0"
