@@ -6,7 +6,10 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 libc = "0.2.184"
+memmap2 = "0.9.10"
 
 [dev-dependencies]
 errno = "0.3.14"
 hegeltest = "0.5.0"
+zeroize = { version = "1.8.2", features = ["zeroize_derive"] }
+clap = { version = "4.6.0", features = ["derive"] }

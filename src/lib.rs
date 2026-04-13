@@ -1,5 +1,5 @@
 #![warn(missing_docs)]
-//! The memfd_secret crate provides a convenient way to store and retrieve sensitive data on Linux by wrapping the [memfd_secret](https://www.man7.org/linux/man-pages//man2/memfd_secret.2.html) syscall. Memory is zeroed when the secret is dropped.
+//! The memfd_secret crate provides a convenient way to store and retrieve sensitive data on Linux by wrapping the [memfd_secret](https://www.man7.org/linux/man-pages//man2/memfd_secret.2.html) syscall. The underlying memory is zeroed when the secret is dropped.
 //! #### Note
 //! The memfd_secret syscall support starts from Linux version 5.14. Prior to Linux 6.5 the admin must pass the `secretmem.enable=y` kernel parameter to use this crate. See the [manpages](https://www.man7.org/linux/man-pages//man2/memfd_secret.2.html) for more information.
 //!
@@ -26,20 +26,89 @@
 //! assert_eq!(vault_contents, secret)
 //! ```
 //!
-//! #### Use Deref behaviour to access and modify secret
+//!
+//! #### Store a secret from the command line using [Clap](https://docs.rs/clap/latest/clap/index.html) and expose it safely
+//! ```
+//! // 1. Implement `std::str::FromStr` to use `Clap::Parser`
+//! use memfd_secret::MemfdSecret;
+//! use std::io::{Read, Write};
+//! use clap::Parser;
+//!
+//! // SecretString wraps memfd_secret to provide a convenient interface
+//! #[derive(Debug, Clone)]
+//! pub struct SecretString {
+//!     secret: MemfdSecret,
+//! }
+//!
+//! // the FromStr trait implementation allows clap to fill the secret
+//! impl std::str::FromStr for SecretString {
+//!     type Err = std::io::Error;
+//!
+//!     fn from_str(s: &str) -> Result<Self, Self::Err> {
+//!         Self::new(s)
+//!     }
+//! }
+//!
+//! impl SecretString {
+//!     pub fn new(s: &str) -> std::io::Result<SecretString> {
+//!         let mut secret = MemfdSecret::new(s.len())?;
+//!         secret.as_mut_slice().write_all(s.as_bytes()).unwrap();
+//!         Ok(SecretString { secret })
+//!     }
+//!
+//!         // the .expose() method returns the secret as a zeroizing string
+//!         // the underlying memory is zeroed when the string is dropped
+//!     pub fn expose(&self) -> zeroize::Zeroizing<String> {
+//!         let mut secret = zeroize::Zeroizing::new(String::new());
+//!         self.secret.as_slice().read_to_string(&mut secret).unwrap();
+//!         secret
+//!    }
+//!}
+//!
+//! // 2. Create and initialise an Args struct with the secret fields
+//! #[derive(Parser, Debug)]
+//! pub struct Args {
+//!     #[clap(long, default_value = "abc")]
+//!     pub api_key: SecretString,
+//!     #[clap(long, default_value = "def")]
+//!     pub secret_api_key: SecretString,
+//! }
+//! impl Args {
+//!     pub fn new() -> Self {
+//!         Self::parse()
+//!     }
+//! }
+//!
+//! fn main() {
+//!     let args = Args::new();
+//!     // 3. Expose the secret
+//!     let actual_api_key = zeroize::Zeroizing::new(String::from("abc"));
+//!     let expected_api_key = args.api_key.expose();
+//!     assert_eq!(expected_api_key, actual_api_key);
+//! }
+
 #[cfg(not(target_os = "linux"))]
 compile_error!("memfd-secret is only supported on linux!");
 
-use std::os::fd::FromRawFd;
+use std::{io::Write, os::fd::FromRawFd};
 
 /// Struct that represents information required to manage a memfd secret
 #[derive(Debug)]
 pub struct MemfdSecret {
     /// file is not used directly, but needs to be held to ensure the mmap remains alive.
     _file: std::fs::File,
-    size: usize,
-    ptr: std::ptr::NonNull<libc::c_void>,
+    memmap: memmap2::MmapMut,
 }
+
+// Clone implemented to satisfy Clap's requirement.
+impl std::clone::Clone for MemfdSecret {
+    fn clone(&self) -> Self {
+        let mut result = Self::new(self.len()).unwrap();
+        (&mut *result).write_all(self).unwrap();
+        result
+    }
+}
+
 impl MemfdSecret {
     /// Create a new `MemfdSecret` with the given size. Use `new()` when a standard memfd_secret is needed.
     /// ```
@@ -80,8 +149,7 @@ impl MemfdSecret {
     /// let byte_slice: &[u8] = &vault[..];
     /// ```
     pub fn as_slice(&self) -> &[u8] {
-        // the pointer is cast as a const u8 rather than a mut u8 to allow safe access from std::ops::Deref
-        unsafe { std::slice::from_raw_parts(self.ptr.as_ptr() as *const u8, self.size) }
+        &self.memmap
     }
     /// Returns a **modifiable** byte slice, see the quickstart for a complete example
     /// ```
@@ -98,19 +166,13 @@ impl MemfdSecret {
     /// let mut byte_slice: &[u8] = &vault[..];
     /// ```
     pub fn as_mut_slice(&mut self) -> &mut [u8] {
-        unsafe { std::slice::from_raw_parts_mut(self.ptr.as_ptr() as *mut u8, self.size) }
+        &mut self.memmap
     }
 }
 impl Drop for MemfdSecret {
     fn drop(&mut self) {
-        unsafe {
-            self.ptr.write_bytes(0, self.size);
-        }
-
-        let result = unsafe { libc::munmap(self.ptr.as_ptr(), self.size) };
-        if result != 0 {
-            panic!("munmap failed with code: {}", result);
-        }
+        // Zero the secret memory on drop.
+        self.memmap.fill(0);
     }
 }
 impl std::ops::Deref for MemfdSecret {
@@ -179,26 +241,10 @@ fn mmap_secret(fd: i64, size: usize) -> std::io::Result<MemfdSecret> {
     } else {
         let file = unsafe { std::fs::File::from_raw_fd(fd as i32) };
         file.set_len(size as u64)?;
-        let ptr = unsafe {
-            libc::mmap(
-                std::ptr::null_mut(),
-                size,
-                libc::PROT_READ | libc::PROT_WRITE,
-                libc::MAP_SHARED_VALIDATE,
-                fd as i32,
-                0,
-            )
-        };
-        std::ptr::NonNull::new(ptr)
-            .ok_or(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "mmap returned a null pointer",
-            ))
-            .map(|ptr| MemfdSecret {
-                _file: file,
-                size,
-                ptr,
-            })
+        unsafe { memmap2::MmapOptions::new().len(size).map_mut(&file) }.map(|memmap| MemfdSecret {
+            _file: file,
+            memmap,
+        })
     }
 }
 #[cfg(test)]
@@ -217,12 +263,6 @@ mod tests {
         let mut read_string = String::new();
         vault.as_slice().read_to_string(&mut read_string).unwrap();
         assert_eq!(read_string, secret);
-    }
-    #[test]
-    #[should_panic]
-    fn munmap_panic() {
-        let mut vault = MemfdSecret::new(10).unwrap();
-        vault.size = 0;
     }
     #[test]
     fn deref() {
