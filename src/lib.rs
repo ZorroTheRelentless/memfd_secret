@@ -1,5 +1,6 @@
 #![warn(missing_docs)]
 //! The memfd_secret crate provides a convenient way to store and retrieve sensitive data on Linux by wrapping the [memfd_secret](https://www.man7.org/linux/man-pages//man2/memfd_secret.2.html) syscall. The underlying memory is zeroed when the secret is dropped.
+//! This crate has 100% unit test coverage, including property testing with [hegel](https://docs.rs/hegeltest/latest/hegel/).
 //! #### Note
 //! The memfd_secret syscall support starts from Linux version 5.14. Prior to Linux 6.5 the admin must pass the `secretmem.enable=y` kernel parameter to use this crate. See the [manpages](https://www.man7.org/linux/man-pages//man2/memfd_secret.2.html) for more information.
 //!
