@@ -1,18 +1,22 @@
-# Rust Memfd-Secret
-> Store and retrieve data from secret memory in Linux.
-
+# Memfd-Secret
+> Store and retrieve data from secret memory in Linux
+ 
 The rust memfd_secret crate provides a convenient way to store and retrieve sensitive data on Linux by wrapping the [memfd_secret](https://www.man7.org/linux/man-pages//man2/memfd_secret.2.html) syscall. The underlying memory is zeroed when the secret is dropped. This crate has 100% unit test coverage, includes property testing with [hegel](https://docs.rs/hegeltest/latest/hegel/).
 
 > [!NOTE]
-> - The memfd_secret syscall support starts from Linux version **5.14**.
+> - Memfd_secret syscall support starts from Linux version **5.14**.
 > - Prior to Linux **6.5** the admin must pass the [secretmem.enable=y kernel parameter](https://www.man7.org/linux/man-pages//man2/memfd_secret.2.html) to use this crate. 
-> - Starting from **Linux 6.5** memfd_secret is enabled by the kernel by default.
+> - Starting from **Linux 6.5** memfd_secret is enabled on the kernel by default.
 
 ## Quickstart
-> *Cargo add memfd-secret* and explore examples in your main.rs
 #### Lets Start Simple: Store and Retrieve a String
+> Your Cargo.toml should look like this *(your versions can vary)*
+```toml
+[dependecies]
+// TODO! add memfd_secret to this dependency list once it's published
+```
+> Your src/main.rs should look like this
 ```rust
-// dependencies
 use memfd_secret::{MemfdSecret};
 use std::io::{Read, Write};
 
@@ -31,7 +35,15 @@ vault.as_slice().read_to_string(&mut vault_contents).unwrap();
 assert_eq!(vault_contents, secret)
 ```
 
-#### Store a secret from the command line using [Clap](https://docs.rs/clap/latest/clap/index.html) and expose it.
+#### Store a secret directly from the command line using [Clap](https://docs.rs/clap/latest/clap/index.html) and expose it on Zeroizing memory.
+> Your Cargo.toml should look like this *(your versions can vary)*
+```toml
+[dependecies]
+zeroize = { version = "1.8.2", features = ["zeroize_derive"] }
+clap = { version = "4.6.0", features = ["derive"] }
+// TODO! add memfd_secret to this dependency list once it's published
+```
+> Your src/main.rs should look like this
 ```rust
 // 1. Implement `std::str::FromStr` to use `Clap::Parser`
 use memfd_secret::MemfdSecret;
