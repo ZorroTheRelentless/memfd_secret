@@ -13,7 +13,8 @@ The rust memfd_secret crate provides a convenient way to store and retrieve sens
 > Your Cargo.toml should look like this *(your versions can vary)*
 ```toml
 [dependecies]
-// TODO! add memfd_secret to this dependency list once it's published
+# TODO! add memfd_secret to this dependency list once it's published
+memfd-secret = { git = "https://github.com/zorrotheimpaler/memfd_secret.git" }
 ```
 > Your src/main.rs should look like this
 ```rust
@@ -41,7 +42,8 @@ assert_eq!(vault_contents, secret)
 [dependecies]
 zeroize = { version = "1.8.2", features = ["zeroize_derive"] }
 clap = { version = "4.6.0", features = ["derive"] }
-// TODO! add memfd_secret to this dependency list once it's published
+# TODO! add memfd_secret to this dependency list once it's published
+memfd-secret = { git = "https://github.com/zorrotheimpaler/memfd_secret.git" }
 ```
 > Your src/main.rs should look like this
 ```rust
