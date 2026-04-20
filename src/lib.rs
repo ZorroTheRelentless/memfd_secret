@@ -1,10 +1,19 @@
 #![warn(missing_docs)]
-//! The memfd_secret crate provides a convenient way to store and retrieve sensitive data on Linux by wrapping the [memfd_secret](https://www.man7.org/linux/man-pages//man2/memfd_secret.2.html) syscall. The underlying memory is zeroed when the secret is dropped.
-//! This crate has 100% unit test coverage, including property testing with [hegel](https://docs.rs/hegeltest/latest/hegel/).
-//! #### Note
-//! The memfd_secret syscall support starts from Linux version 5.14. Prior to Linux 6.5 the admin must pass the `secretmem.enable=y` kernel parameter to use this crate. See the [manpages](https://www.man7.org/linux/man-pages//man2/memfd_secret.2.html) for more information.
+//! The `memfd_secret` crate provides a convenient way to store and retrieve
+//! sensitive data on Linux by wrapping the
+//! [`memfd_secret`](https://www.man7.org/linux/man-pages//man2/memfd_secret.2.html)
+//! syscall. The underlying memory is zeroed when the secret is dropped. This
+//! crate has 100% unit test coverage, including property testing with
+//! [`hegel`](https://docs.rs/hegeltest/latest/hegel/).
 //!
-//! Starting from Linux 6.5 memfd_secret is enabled by the kernel by default.
+//! #### Note
+//! The `memfd_secret` syscall support starts from Linux version 5.14. Prior to
+//! Linux 6.5 the admin must pass the `secretmem.enable=y` kernel parameter to
+//! use this crate. See the
+//! [manpages](https://www.man7.org/linux/man-pages//man2/memfd_secret.2.html)
+//! for more information.
+//!
+//! Starting from Linux 6.5 `memfd_secret` is enabled by the kernel by default.
 //!
 //! # Quickstart
 //! #### Store and Retrieve a String
@@ -28,9 +37,9 @@
 //! ```
 //!
 //!
-//! #### Store a secret from the command line using [Clap](https://docs.rs/clap/latest/clap/index.html) and expose it safely
+//! #### Store a secret from the command line using [clap](https://docs.rs/clap/latest/clap/index.html) and expose it safely
 //! ```
-//! // 1. Implement `std::str::FromStr` to use `Clap::Parser`
+//! // 1. Implement `std::str::FromStr` to use `clap::Parser`
 //! use memfd_secret::MemfdSecret;
 //! use std::io::{Read, Write};
 //! use clap::Parser;
@@ -59,6 +68,7 @@
 //!
 //!         // the .expose() method returns the secret as a zeroizing string
 //!         // the underlying memory is zeroed when the string is dropped
+//!         // and the original copy is still in the `memfd_secret` vault.
 //!     pub fn expose(&self) -> zeroize::Zeroizing<String> {
 //!         let mut secret = zeroize::Zeroizing::new(String::new());
 //!         self.secret.as_slice().read_to_string(&mut secret).unwrap();
@@ -87,6 +97,7 @@
 //!     let expected_api_key = args.api_key.expose();
 //!     assert_eq!(expected_api_key, actual_api_key);
 //! }
+//! ```
 
 #[cfg(not(target_os = "linux"))]
 compile_error!("memfd-secret is only supported on linux!");
@@ -96,15 +107,19 @@ use std::{io::Write, os::fd::FromRawFd};
 /// Struct that represents information required to manage a memfd secret
 #[derive(Debug)]
 pub struct MemfdSecret {
-    /// file is not used directly, but needs to be held to ensure the mmap remains alive.
+    // file is not used directly, but needs to be held to ensure the mmap remains alive.
     _file: std::fs::File,
     memmap: memmap2::MmapMut,
+    flags: MemfdSecretFlags,
 }
 
 // Clone implemented to satisfy Clap's requirement.
 impl std::clone::Clone for MemfdSecret {
     fn clone(&self) -> Self {
-        let mut result = Self::new(self.len()).unwrap();
+        let mut result = Self::builder()
+            .with_flags(self.flags)
+            .build(self.len())
+            .unwrap();
         (&mut *result).write_all(self).unwrap();
         result
     }
@@ -125,7 +140,7 @@ impl MemfdSecret {
     /// // *cloexec: false* allows a subprocess access
     /// # use memfd_secret::{MemfdSecret, MemfdSecretFlags};
     /// let mut vault = MemfdSecret::builder()
-    ///    .with_flags(MemfdSecretFlags { cloexec: false })
+    ///    .with_flags(MemfdSecretFlags::new().with_cloexec(false))
     ///    .build(1)
     ///    .unwrap();
     /// vault[0] = 1;
@@ -135,14 +150,15 @@ impl MemfdSecret {
         MemfdSecretBuilder::new()
     }
 
-    /// Returns a **read only** byte slice, see quickstart for a complete example.
+    /// Returns a **read only** byte slice.
     /// ```
     /// # use memfd_secret::{MemfdSecret};
     /// # let secret = "my secret";
     /// # let mut vault = MemfdSecret::new(secret.len()).unwrap();
     /// let byte_slice = vault.as_slice();
     /// ```
-    /// Alternatively use the Deref trait implemented for MemfdSecret to access the data using the same underlying function.
+    /// Alternatively use the [`Deref`](`std::ops::Deref`) trait implemented for MemfdSecret to access
+    /// the data using the same underlying function.
     /// ```
     /// # use memfd_secret::{MemfdSecret};
     /// # let secret = "my secret";
@@ -152,14 +168,15 @@ impl MemfdSecret {
     pub fn as_slice(&self) -> &[u8] {
         &self.memmap
     }
-    /// Returns a **modifiable** byte slice, see the quickstart for a complete example
+    /// Returns a **modifiable** byte slice
     /// ```
     /// # use memfd_secret::{MemfdSecret};
     /// # let secret = "my secret";
     /// # let mut vault = MemfdSecret::new(secret.len()).unwrap();
     /// let mut byte_slice = vault.as_slice();
     /// ```
-    /// Alternatively use the Deref trait implemented for MemfdSecret to access the data using the same underlying function.
+    /// Alternatively use the [`Deref`](`std::ops::Deref`) trait implemented for MemfdSecret to access
+    /// the data using the same underlying function.
     /// ```
     /// # use memfd_secret::{MemfdSecret};
     /// # let secret = "my secret";
@@ -189,27 +206,42 @@ impl std::ops::DerefMut for MemfdSecret {
     }
 }
 
-#[derive(Debug)]
-/// Valid flag/s for memfd_secret.
+#[derive(Debug, Copy, Clone)]
+/// Flags for configuring the [`MemfdSecret`] syscall.
+///
 /// Currently the syscall memfd_secret only accepts one flag.
 // Struct is more for organised and for future use in case new flags are added for memfd_secret.
+#[non_exhaustive]
 pub struct MemfdSecretFlags {
-    /// `libc::O_CLOEXEC` prevents sub-processes from accessing the file.
-    /// **Default: false**
+    /// This maps to `libc::O_CLOEXEC` prevents sub-processes from accessing the file.
     pub cloexec: bool,
 }
 
+impl MemfdSecretFlags {
+    /// Creates new MemfdSecretFlags with defaults.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets the `cloexec` flag.
+    pub fn with_cloexec(mut self, cloexec: bool) -> Self {
+        self.cloexec = cloexec;
+        self
+    }
+}
+
+impl Default for MemfdSecretFlags {
+    fn default() -> Self {
+        Self { cloexec: true }
+    }
+}
+
+#[derive(Default)]
 /// Builder options are already exposed through MemfdSecret.
 pub struct MemfdSecretBuilder {
     flags: MemfdSecretFlags,
 }
-impl Default for MemfdSecretBuilder {
-    fn default() -> Self {
-        Self {
-            flags: MemfdSecretFlags { cloexec: true },
-        }
-    }
-}
+
 impl MemfdSecretBuilder {
     /// Creates new MemfdSecretBuilder with defaults.
     pub fn new() -> Self {
@@ -222,19 +254,21 @@ impl MemfdSecretBuilder {
     }
     /// Builds MemfdSecret with passed parameters.
     pub fn build(self, size: usize) -> std::io::Result<MemfdSecret> {
-        memfd_secret(&self.flags, size)
+        memfd_secret(self.flags, size)
     }
 }
 
-fn memfd_secret(flags: &MemfdSecretFlags, size: usize) -> std::io::Result<MemfdSecret> {
+fn memfd_secret(flags: MemfdSecretFlags, size: usize) -> std::io::Result<MemfdSecret> {
     // flag to memfd secret libc::O_CLOEXEC, prevents sub-processed from accessing the file.
     // pass setting through struct
-    let flags = if flags.cloexec { libc::O_CLOEXEC } else { 0 };
-    let fd = unsafe { libc::syscall(libc::SYS_memfd_secret, flags) };
-    mmap_secret(fd, size)
+    let fd = {
+        let flags = if flags.cloexec { libc::O_CLOEXEC } else { 0 };
+        unsafe { libc::syscall(libc::SYS_memfd_secret, flags) }
+    };
+    mmap_secret(fd, size, flags)
 }
 
-fn mmap_secret(fd: i64, size: usize) -> std::io::Result<MemfdSecret> {
+fn mmap_secret(fd: i64, size: usize, flags: MemfdSecretFlags) -> std::io::Result<MemfdSecret> {
     if fd < 0 {
         //Error case
         let os_error = std::io::Error::last_os_error();
@@ -245,9 +279,11 @@ fn mmap_secret(fd: i64, size: usize) -> std::io::Result<MemfdSecret> {
         unsafe { memmap2::MmapOptions::new().len(size).map_mut(&file) }.map(|memmap| MemfdSecret {
             _file: file,
             memmap,
+            flags,
         })
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,7 +304,7 @@ mod tests {
     #[test]
     fn deref() {
         let (vault, secret) = string_sample();
-        assert_eq!(vault[0], secret.as_bytes()[0]);
+        assert_eq!(vault[..], secret.as_bytes()[..]);
     }
     #[test]
     fn deref_mut() {
@@ -285,6 +321,13 @@ mod tests {
         vault[0] = 1;
         assert_eq!(vault[0], 1);
     }
+    #[test]
+    fn clone() {
+        let (vault, secret) = string_sample();
+        let cloned = vault.clone();
+        assert_eq!(vault[..], cloned[..]);
+        assert_eq!(cloned[..], secret.as_bytes()[..]);
+    }
     //TODO create a test case to actually test the cloexec flag by spawning a child process.
     // #[test]
     // fn sub_process_access_with_cloexec() {
@@ -294,7 +337,7 @@ mod tests {
     fn memfd_secret_error() {
         // sets a global error
         errno::set_errno(errno::Errno(libc::EINVAL));
-        let actual = mmap_secret(-1, 1).unwrap_err();
+        let actual = mmap_secret(-1, 1, Default::default()).unwrap_err();
         // tests if mmap_secret returned the global error
         assert_eq!(actual.kind(), std::io::ErrorKind::InvalidInput)
     }
@@ -305,6 +348,7 @@ mod tests {
         assert_eq!(actual.kind(), std::io::ErrorKind::InvalidInput)
     }
 }
+
 #[cfg(test)]
 mod property_tests {
     use super::*;

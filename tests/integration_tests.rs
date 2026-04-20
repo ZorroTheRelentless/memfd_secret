@@ -17,7 +17,7 @@ fn write_retrieve() {
 #[test]
 fn with_flag_cloexec() {
     let mut vault = MemfdSecret::builder()
-        .with_flags(MemfdSecretFlags { cloexec: false })
+        .with_flags(MemfdSecretFlags::new().with_cloexec(false))
         .build(1)
         .unwrap();
     vault[0] = 1;
