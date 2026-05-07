@@ -3,6 +3,16 @@ name = "memfd-secret"
 version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
+description = '''
+Rust wrapper for the `memfd_secret` syscall that allows programs to store
+sensitive data.
+'''
+readme = "README.md"
+authors = ["Zoravar Singh Kalkat <zorro@zoravar.eu>"]
+repository = "https://github.com/ZorroTheRelentless/memfd_secret"
+keywords = ["memfd_secret", "secret", "syscall"]
+categories = ["os::linux-apis", "api-bindings"]
+
 
 [dependencies]
 libc = "0.2.184"
