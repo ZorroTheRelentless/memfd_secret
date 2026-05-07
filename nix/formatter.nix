@@ -1,4 +1,3 @@
-
 {
   flake,
   inputs,
@@ -19,10 +18,6 @@ let
 
       # Rust
       rustfmt.enable = true;
-
-      # Markdown
-      rumdl-check.enable = true;
-      rumdl-format.enable = true;
 
       # TOML
       taplo.enable = true;

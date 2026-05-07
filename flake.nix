@@ -23,7 +23,6 @@
     };
   };
 
-
   outputs =
     inputs:
     inputs.blueprint {
