@@ -1,0 +1,16 @@
+name: Periodic checks
+on:
+  schedule:
+    - cron: "5 4 * * *"
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up nix
+        uses: nixbuild/nix-quick-install-action@v34
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up nix devshell
+        run: nix develop
+      - name: Run cargo deny
+        run: nix develop -c cargo deny check
