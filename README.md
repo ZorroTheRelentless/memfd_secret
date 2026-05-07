@@ -19,7 +19,7 @@ The rust memfd_secret crate provides a convenient way to store and retrieve sens
 ```toml
 [dependencies]
 # TODO! add memfd_secret to this dependency list once it's published
-memfd-secret = { git = "https://github.com/zorrotheimpaler/memfd_secret.git" }
+memfd-secret = { memfd-secret = "1.0.0" }
 ```
 
 > Your src/main.rs should look like this
